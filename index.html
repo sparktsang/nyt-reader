@@ -81,7 +81,7 @@
                 outputDiv.innerText = text;
                 outputDiv.style.display = 'block';
             } catch (e) {
-                statusDiv.innerText = "提取失敗：" + e.message;
+                statusDiv.innerText = "EXTRACTION FAILED: " + e.message;
             }
         }
 
@@ -91,7 +91,7 @@
             const regex = /window\.__preloadedData\s*=\s*(\{[\s\S]*?\});/;
             const match = htmlSource.match(regex);
 
-            if (!match) throw new Error("搵唔到 window.__preloadedData 數據。");
+            if (!match) throw new Error("UNABLE TO FIND window.__preloadedData DATA.");
 
             let jsonStr = match[1];
 
@@ -103,12 +103,12 @@
             try {
                 data = JSON.parse(jsonStr);
             } catch (e) {
-                throw new Error("JSON 解析錯誤，可能原始碼不完整。");
+                throw new Error("JSON PARSING FAILED: SOURCE CODE MAY BE INCOMPLETE");
             }
 
             // 4. 開始提取資料 (使用 Optional Chaining ?. 避免報錯)
             const article = data?.initialData?.data?.article;
-            if (!article) throw new Error("搵唔到文章結構。");
+            if (!article) throw new Error("FAILED TO FIND ARTICLE STRUCTURE");
 
             // --- 標題與摘要 ---
             const headline = article.headline?.default || "";
