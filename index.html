@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NYT Article Extractor</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 { font-size: 1.2rem; color: #555; }
+        textarea {
+            width: 100%;
+            height: 150px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-bottom: 10px;
+            box-sizing: border-box; /* 防止超出寬度 */
+        }
+        button {
+            background-color: #000;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            width: 100%;
+        }
+        button:hover { background-color: #333; }
+        
+        /* 模擬 NYT 的閱讀排版 */
+        #output {
+            margin-top: 30px;
+            background: #fff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            white-space: pre-wrap; /* 保留換行格式 */
+            font-family: Georgia, 'Times New Roman', Times, serif;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            display: none; /* 預設隱藏 */
+        }
+        .error { color: red; font-weight: bold; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>NYT Source Extractor (Paste HTML Source Below)</h1>
+    <textarea id="sourceInput" placeholder="在此貼上 view-source: 的全部內容..."></textarea>
+    <button onclick="processHTML()">Extract Article</button>
+    <div id="status" class="error"></div>
+    <div id="output"></div>
+
+    <script>
+        function processHTML() {
+            const html = document.getElementById('sourceInput').value;
+            const statusDiv = document.getElementById('status');
+            const outputDiv = document.getElementById('output');
+            
+            statusDiv.innerText = "";
+            outputDiv.style.display = 'none';
+            outputDiv.innerText = "";
+
+            if (!html) {
+                statusDiv.innerText = "請先貼上原始碼。";
+                return;
+            }
+
+            try {
+                const text = extractNYT(html);
+                outputDiv.innerText = text;
+                outputDiv.style.display = 'block';
+            } catch (e) {
+                statusDiv.innerText = "提取失敗：" + e.message;
+            }
+        }
+
+        function extractNYT(htmlSource) {
+            // 1. Regex 提取 window.__preloadedData
+            // JS 的 . 不匹配換行，所以用 [\s\S] 代表所有字符
+            const regex = /window\.__preloadedData\s*=\s*(\{[\s\S]*?\});/;
+            const match = htmlSource.match(regex);
+
+            if (!match) throw new Error("搵唔到 window.__preloadedData 數據。");
+
+            let jsonStr = match[1];
+
+            // 2. 修正 JS 特有的 'undefined' 為 JSON 的 'null'
+            jsonStr = jsonStr.replace(/undefined/g, 'null');
+
+            // 3. 解析 JSON
+            let data;
+            try {
+                data = JSON.parse(jsonStr);
+            } catch (e) {
+                throw new Error("JSON 解析錯誤，可能原始碼不完整。");
+            }
+
+            // 4. 開始提取資料 (使用 Optional Chaining ?. 避免報錯)
+            const article = data?.initialData?.data?.article;
+            if (!article) throw new Error("搵唔到文章結構。");
+
+            // --- 標題與摘要 ---
+            const headline = article.headline?.default || "";
+            const summary = article.summary || "";
+            const url = article.url || "";
+
+            // --- 內文區塊 ---
+            const contentBlocks = article.sprinkledBody?.content || [];
+
+            // --- 尋找 Header Block (為了抓地點和作者) ---
+            let headerBlock = contentBlocks.find(b => b.__typename && b.__typename.includes("Header"));
+
+            // --- 作者 ---
+            let bylineText = "";
+            if (headerBlock && headerBlock.byline && headerBlock.byline.bylines) {
+                bylineText = headerBlock.byline.bylines[0]?.renderedRepresentation || "";
+            }
+            if (!bylineText && article.bylines) {
+                bylineText = article.bylines[0]?.renderedRepresentation || "";
+            }
+
+            // --- 地點 (Reporting from...) ---
+            let locationText = "";
+            if (headerBlock && headerBlock.role) {
+                locationText = headerBlock.role.map(r => r.text).join("");
+            }
+
+            // --- 日期 (處理 UTC -> 美東時間) ---
+            let dateText = "";
+            const rawDate = article.firstPublished || "";
+            if (rawDate) {
+                try {
+                    const dateObj = new Date(rawDate);
+                    // 減去 5 小時 (簡單模擬美東時區，JS日期處理較繁瑣，這裡用時間戳計算)
+                    // 1 hour = 3600000 ms
+                    const estTime = new Date(dateObj.getTime() - (5 * 3600000));
+                    
+                    // 格式化為 Dec. 26, 2025
+                    const options = { year: 'numeric', month: 'short', day: 'numeric' };
+                    // 使用 en-US 格式
+                    let dateStr = estTime.toLocaleDateString('en-US', options);
+                    // JS 預設是 "Dec 26, 2025"，要手動加點變成 "Dec. 26, 2025"
+                    dateText = dateStr.replace(/([a-zA-Z]+)/, "$1."); 
+                } catch (e) {
+                    dateText = rawDate;
+                }
+            }
+
+            // --- 組合輸出 ---
+            let output = [];
+
+            output.push("The New York Times");
+            output.push("");
+            output.push(headline);
+            output.push(summary);
+            output.push("");
+            
+            // 作者區塊緊湊排列
+            if (bylineText) output.push(bylineText);
+            if (locationText) output.push(locationText);
+            if (dateText) output.push(dateText);
+            
+            output.push(""); // 正文前空行
+
+            // --- 遍歷正文 ---
+            contentBlocks.forEach(block => {
+                const type = block.__typename;
+
+                // 跳過 Header
+                if (type && type.includes("Header")) return;
+
+                if (type === "ParagraphBlock") {
+                    const text = block.content.map(seg => seg.text).join("");
+                    if (text) {
+                        output.push(text);
+                        output.push(""); // 段落間隔
+                    }
+                } else if (["Heading1Block", "Heading2Block", "Heading3Block"].includes(type)) {
+                    const text = block.content.map(seg => seg.text).join("");
+                    if (text) {
+                        // 小標題前多空一行，視覺更清晰
+                        if (output.length > 0 && output[output.length-1] !== "") {
+                            output.push("");
+                        }
+                        output.push(text);
+                        output.push("");
+                    }
+                }
+            });
+
+            // 移除尾部多餘空行
+            while(output.length > 0 && output[output.length-1] === "") {
+                output.pop();
+            }
+
+            output.push("");
+            output.push(url);
+
+            return output.join("\n");
+        }
+    </script>
+</body>
+</html>
