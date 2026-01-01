@@ -3,72 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal NYT Extractor</title>
+    <title>Universal NYT Extractor (Enhanced)</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; color: #333; }
         h1 { font-size: 1.2rem; color: #555; }
-        textarea {
-            width: 100%;
-            height: 150px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-family: monospace;
-            font-size: 12px;
-            margin-bottom: 10px;
-            box-sizing: border-box; 
-        }
-        button {
-            background-color: #000;
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1rem;
-            width: 100%;
-        }
+        textarea { width: 100%; height: 150px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-family: monospace; font-size: 12px; margin-bottom: 10px; box-sizing: border-box; }
+        button { background-color: #000; color: #fff; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 1rem; width: 100%; }
         button:hover { background-color: #333; }
-        
-        #output {
-            margin-top: 30px;
-            background: #fff;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            white-space: pre-wrap; 
-            font-family: Georgia, 'Times New Roman', Times, serif;
-            font-size: 1.1rem;
-            line-height: 1.6;
-            display: none; 
-        }
+        #output { margin-top: 30px; background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); white-space: pre-wrap; font-family: Georgia, 'Times New Roman', Times, serif; font-size: 1.1rem; line-height: 1.6; display: none; }
         .error { color: red; font-weight: bold; margin-top: 10px; font-family: monospace; }
-        
-        /* Live Blog 樣式微調 */
-        .live-update-time {
-            font-family: sans-serif;
-            font-size: 0.8rem;
-            color: #888;
-            font-weight: bold;
-            margin-top: 20px;
-            display: block;
-        }
-        .live-divider {
-            border-top: 1px solid #eee;
-            margin: 30px 0;
-        }
+        .update-divider { border-top: 2px solid #000; margin: 40px 0 20px 0; }
+        .time-label { font-family: sans-serif; font-weight: bold; font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
+        .headline { font-weight: bold; font-size: 1.3rem; margin-bottom: 10px; display: block; }
     </style>
 </head>
 <body>
 
-    <h1>NYT Source Extractor (Supports Live Blogs)</h1>
+    <h1>NYT Source Extractor (LD+JSON Support)</h1>
     <textarea id="sourceInput" placeholder="在此貼上 view-source: 的全部內容..."></textarea>
     <button onclick="processHTML()">Extract Article</button>
     <div id="status" class="error"></div>
@@ -90,207 +41,130 @@
             }
 
             try {
-                const text = extractNYT(html);
+                const text = extractContent(html);
                 outputDiv.innerText = text;
                 outputDiv.style.display = 'block';
             } catch (e) {
-                statusDiv.innerText = "EXTRACTION FAILED: " + e.message;
+                statusDiv.innerText = "提取失敗: " + e.message;
             }
         }
 
-        function extractNYT(htmlSource) {
-            // 1. 改進提取方法：不再使用 Regex 抓取 {}，而是尋找 Script 標籤內容
-            // 這樣可以避免 Regex 因為嵌套括號而提早結束的問題
-            let jsonStr = "";
-            
-            // 創建一個虛擬 DOM 來解析 HTML (比 Regex 更準確)
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(htmlSource, "text/html");
-            const scripts = doc.getElementsByTagName("script");
-
-            for (let i = 0; i < scripts.length; i++) {
-                const content = scripts[i].innerHTML;
-                if (content && content.includes("window.__preloadedData =")) {
-                    // 移除變數宣告部分
-                    let cleanContent = content.trim();
-                    // 找到 JSON 的開始位置
-                    const startIndex = cleanContent.indexOf("{");
-                    // 找到 JSON 的結束位置 (最後一個分號之前)
-                    const endIndex = cleanContent.lastIndexOf("}");
-                    
-                    if (startIndex !== -1 && endIndex !== -1) {
-                        jsonStr = cleanContent.substring(startIndex, endIndex + 1);
-                        break; 
-                    }
-                }
-            }
-
-            if (!jsonStr) {
-                // 後備方案：如果 DOMParser 失敗，嘗試用 Regex 抓取 script tag 內容
-                const regex = /window\.__preloadedData\s*=\s*(\{[\s\S]*?\});/;
-                const match = htmlSource.match(regex);
-                if (match) {
-                     jsonStr = match[1];
-                } else {
-                    throw new Error("Cannot find window.__preloadedData in source.");
-                }
-            }
-
-            // 2. 修正 JS 特有的 'undefined'
-            jsonStr = jsonStr.replace(/":undefined/g, '":null'); // 更安全的替換
-            jsonStr = jsonStr.replace(/undefined/g, 'null');
-
-            // 3. 解析 JSON
-            let data;
-            try {
-                data = JSON.parse(jsonStr);
-            } catch (e) {
-                console.error(e);
-                throw new Error("JSON PARSING FAILED: Source code may be incomplete or format changed.");
-            }
-
+        function extractContent(htmlSource) {
             let output = [];
 
-            // -----------------------------------------------------------
-            // 判斷是 普通文章 (Article) 還是 直播報導 (Live Blog)
-            // -----------------------------------------------------------
-            
-            const initialDataArticle = data?.initialData?.data?.article;
-            const initialState = data?.initialState;
+            // -------------------------------------------------------------
+            // 策略 A: 優先嘗試解析 LD+JSON (Schema.org)
+            // 這是 Live Blog 儲存完整 articleBody 的地方
+            // -------------------------------------------------------------
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(htmlSource, "text/html");
+                const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
 
-            // ===== 情況 A：普通文章 =====
-            if (initialDataArticle) {
-                parseStandardArticle(initialDataArticle, output);
-            } 
-            // ===== 情況 B：直播報導 (Live Blog) =====
-            else if (initialState) {
-                parseLiveBlog(initialState, output);
-            } else {
-                throw new Error("Unknown data structure.");
-            }
+                for (let i = 0; i < scripts.length; i++) {
+                    try {
+                        const json = JSON.parse(scripts[i].innerText);
+                        
+                        // 檢查是否為 LiveBlogPosting
+                        if (json['@type'] === 'LiveBlogPosting' && json.liveBlogUpdate) {
+                            
+                            output.push("The New York Times (Live Blog)");
+                            output.push("");
+                            output.push(json.headline || "");
+                            output.push(json.description || "");
+                            output.push("========================================");
+                            output.push("");
 
-            return output.join("\n");
-        }
+                            const updates = Array.isArray(json.liveBlogUpdate) ? json.liveBlogUpdate : [json.liveBlogUpdate];
+                            
+                            // 按時間倒序
+                            updates.sort((a, b) => new Date(b.datePublished) - new Date(a.datePublished));
 
-        // --- 解析普通文章 ---
-        function parseStandardArticle(article, output) {
-            const headline = article.headline?.default || "";
-            const summary = article.summary || "";
-            const url = article.url || "";
-            const rawDate = article.firstPublished || "";
-            
-            let bylineText = "";
-            let locationText = "";
+                            updates.forEach(update => {
+                                const timeStr = formatDate(update.datePublished, true);
+                                const headline = update.headline || "";
+                                const body = update.articleBody || ""; // 這裡就是你肉眼看到的那些長文
 
-            const contentBlocks = article.sprinkledBody?.content || [];
-            
-            // 抓取 Header 資訊
-            let headerBlock = contentBlocks.find(b => b.__typename && b.__typename.includes("Header"));
-            if (headerBlock) {
-                if (headerBlock.byline?.bylines) bylineText = headerBlock.byline.bylines[0]?.renderedRepresentation || "";
-                if (headerBlock.role) locationText = headerBlock.role.map(r => r.text).join("");
-            }
-            if (!bylineText && article.bylines) bylineText = article.bylines[0]?.renderedRepresentation || "";
+                                output.push(`[${timeStr}]`);
+                                if (headline) output.push(headline);
+                                output.push("");
+                                output.push(body); // 直接輸出 articleBody
+                                output.push("");
+                                output.push("----------------------------------------");
+                                output.push("");
+                            });
 
-            // 組合 Header
-            output.push("The New York Times");
-            output.push("");
-            output.push(headline);
-            if(summary) output.push(summary);
-            output.push("");
-            if (bylineText) output.push(bylineText);
-            if (locationText) output.push(locationText);
-            if (rawDate) output.push(formatDate(rawDate));
-            output.push("");
-
-            // 組合正文
-            contentBlocks.forEach(block => {
-                const type = block.__typename;
-                if (type && type.includes("Header")) return;
-                
-                if (type === "ParagraphBlock") {
-                    const text = block.content.map(seg => seg.text).join("");
-                    if (text) { output.push(text); output.push(""); }
-                } else if (["Heading1Block", "Heading2Block", "Heading3Block"].includes(type)) {
-                    const text = block.content.map(seg => seg.text).join("");
-                    if (text) { output.push(""); output.push(text); output.push(""); }
-                }
-            });
-            output.push(""); output.push(url);
-        }
-
-        // --- 解析 Live Blog (直播報導) ---
-        function parseLiveBlog(state, output) {
-            output.push("The New York Times (Live Updates)");
-            output.push("");
-
-            // 1. 尋找主要標題 (通常在 LegacyCollection 或 LiveEvent 裡)
-            // 我們遍歷 initialState 尋找看起來像標題的東西
-            let mainHeadline = "";
-            let mainSummary = "";
-            
-            // 嘗試從 LegacyCollection 抓主標題
-            const collectionKey = Object.keys(state).find(k => k.startsWith("LegacyCollection"));
-            if (collectionKey) {
-                mainHeadline = state[collectionKey]?.headline?.default || "";
-                mainSummary = state[collectionKey]?.summary || "";
-            }
-
-            output.push(mainHeadline);
-            if (mainSummary) output.push(mainSummary);
-            output.push("------------------------------------------------");
-            output.push("");
-
-            // 2. 提取所有 ReporterUpdate (直播更新塊)
-            const updates = [];
-            
-            Object.keys(state).forEach(key => {
-                if (key.startsWith("ReporterUpdate") || key.startsWith("Article")) { // 有時最新的 update 會係 Article 類型
-                    const item = state[key];
-                    // 確保有 body content
-                    if (item.body && item.body.content) {
-                        updates.push(item);
+                            return output.join("\n"); // 成功找到，直接返回
+                        }
+                    } catch (e) {
+                        continue;
                     }
                 }
-            });
+            } catch (e) {
+                console.log("LD+JSON parsing failed, falling back...");
+            }
 
-            // 3. 排序 (根據 firstPublished 倒序，最新的在上面)
-            updates.sort((a, b) => {
-                const dateA = new Date(a.firstPublished || 0);
-                const dateB = new Date(b.firstPublished || 0);
-                return dateB - dateA;
-            });
 
-            // 4. 輸出每一個 Update
-            updates.forEach(update => {
-                const timeStr = formatDate(update.firstPublished, true); // 顯示時間
-                const headline = update.headline?.default || "";
-                const byline = update.bylines?.[0]?.renderedRepresentation || "";
+            // -------------------------------------------------------------
+            // 策略 B: 如果策略 A 失敗，回退到舊的 window.__preloadedData 方法
+            // (適用於普通文章)
+            // -------------------------------------------------------------
+            const regex = /window\.__preloadedData\s*=\s*(\{[\s\S]*?\});/;
+            const match = htmlSource.match(regex);
 
-                output.push(`[${timeStr}]`);
-                if (headline) output.push(headline);
-                if (byline) output.push(byline);
-                output.push("");
+            if (match) {
+                let jsonStr = match[1].replace(/":undefined/g, '":null').replace(/undefined/g, 'null');
+                const data = JSON.parse(jsonStr);
+                
+                const article = data?.initialData?.data?.article;
+                
+                if (article) {
+                    const headline = article.headline?.default || "";
+                    const summary = article.summary || "";
+                    const url = article.url || "";
+                    
+                    // 抓取 Header
+                    let bylineText = "";
+                    const contentBlocks = article.sprinkledBody?.content || [];
+                    let headerBlock = contentBlocks.find(b => b.__typename && b.__typename.includes("Header"));
+                    if (headerBlock && headerBlock.byline?.bylines) {
+                        bylineText = headerBlock.byline.bylines[0]?.renderedRepresentation || "";
+                    }
 
-                // 內文
-                const blocks = update.body.content || [];
-                blocks.forEach(block => {
-                     if (block.__typename === "ParagraphBlock") {
-                        const text = block.content.map(seg => seg.text).join("");
-                        if (text) { output.push(text); output.push(""); }
-                     }
-                });
-                output.push("-------------------");
-                output.push("");
-            });
+                    output.push("The New York Times");
+                    output.push("");
+                    output.push(headline);
+                    output.push(summary);
+                    output.push("");
+                    output.push(bylineText);
+                    output.push(formatDate(article.firstPublished));
+                    output.push("");
+
+                    contentBlocks.forEach(block => {
+                        const type = block.__typename;
+                        if (type && type.includes("Header")) return;
+                        
+                        if (type === "ParagraphBlock") {
+                            const text = block.content.map(seg => seg.text).join("");
+                            if (text) { output.push(text); output.push(""); }
+                        } else if (["Heading1Block", "Heading2Block", "Heading3Block"].includes(type)) {
+                            const text = block.content.map(seg => seg.text).join("");
+                            if (text) { output.push(""); output.push(text); output.push(""); }
+                        }
+                    });
+                    output.push(""); output.push(url);
+                    return output.join("\n");
+                }
+            }
+
+            throw new Error("無法提取內容。可能是格式不支援或原始碼不完整。");
         }
 
-        // --- 日期格式化工具 ---
+        // 日期格式化 (UTC -> 美東時間)
         function formatDate(isoString, includeTime = false) {
             if (!isoString) return "";
             try {
                 const dateObj = new Date(isoString);
-                // 減去 5 小時 (美東時間)
                 const estTime = new Date(dateObj.getTime() - (5 * 3600000));
                 
                 const optionsDate = { year: 'numeric', month: 'short', day: 'numeric' };
