@@ -20,7 +20,7 @@
 <body>
 
     <h1>NYT Source Extractor (LD+JSON Support)</h1>
-    <textarea id="sourceInput" placeholder="在此貼上 view-source: 的全部內容..."></textarea>
+    <textarea id="sourceInput" placeholder="Paste all content in 'view-source:' here..."></textarea>
     <button onclick="processHTML()">Extract Article</button>
     <div id="status" class="error"></div>
     <div id="output"></div>
@@ -36,7 +36,7 @@
             outputDiv.innerText = "";
 
             if (!html) {
-                statusDiv.innerText = "請先貼上原始碼。";
+                statusDiv.innerText = "PLEASE INPUT THE SOURCE CODE";
                 return;
             }
 
@@ -45,7 +45,7 @@
                 outputDiv.innerText = text;
                 outputDiv.style.display = 'block';
             } catch (e) {
-                statusDiv.innerText = "提取失敗: " + e.message;
+                statusDiv.innerText = "EXTRACTION FAILED: " + e.message;
             }
         }
 
@@ -157,7 +157,7 @@
                 }
             }
 
-            throw new Error("無法提取內容。可能是格式不支援或原始碼不完整。");
+            throw new Error("EXTRACTION FAILED; FORMAT INCOMPATIBLE OR SOURCE CODE INCOMPLETE");
         }
 
         // 日期格式化 (UTC -> 美東時間)
