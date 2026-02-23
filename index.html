@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal NYT Extractor (Enhanced)</title>
+    <title>Universal NYT Extractor (Pro)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; color: #333; }
         h1 { font-size: 1.2rem; color: #555; }
@@ -12,14 +12,11 @@
         button:hover { background-color: #333; }
         #output { margin-top: 30px; background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); white-space: pre-wrap; font-family: Georgia, 'Times New Roman', Times, serif; font-size: 1.1rem; line-height: 1.6; display: none; }
         .error { color: red; font-weight: bold; margin-top: 10px; font-family: monospace; }
-        .update-divider { border-top: 2px solid #000; margin: 40px 0 20px 0; }
-        .time-label { font-family: sans-serif; font-weight: bold; font-size: 0.9rem; color: #666; display: block; margin-bottom: 5px; }
-        .headline { font-weight: bold; font-size: 1.3rem; margin-bottom: 10px; display: block; }
     </style>
 </head>
 <body>
 
-    <h1>NYT Source Extractor (LD+JSON Support)</h1>
+    <h1>NYT Source Extractor (LD+JSON & DOM Support)</h1>
     <textarea id="sourceInput" placeholder="Paste all content in 'view-source:' here..."></textarea>
     <button onclick="processHTML()">Extract Article</button>
     <div id="status" class="error"></div>
@@ -46,28 +43,24 @@
                 outputDiv.style.display = 'block';
             } catch (e) {
                 statusDiv.innerText = "EXTRACTION FAILED: " + e.message;
+                console.error(e);
             }
         }
 
         function extractContent(htmlSource) {
             let output = [];
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlSource, "text/html");
 
             // -------------------------------------------------------------
-            // 策略 A: 優先嘗試解析 LD+JSON (Schema.org)
-            // 這是 Live Blog 儲存完整 articleBody 的地方
+            // 策略 A: 優先嘗試解析 LD+JSON (Schema.org) - 適用於 Live Blog
             // -------------------------------------------------------------
             try {
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(htmlSource, "text/html");
                 const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
-
                 for (let i = 0; i < scripts.length; i++) {
                     try {
                         const json = JSON.parse(scripts[i].innerText);
-                        
-                        // 檢查是否為 LiveBlogPosting
                         if (json['@type'] === 'LiveBlogPosting' && json.liveBlogUpdate) {
-                            
                             output.push("The New York Times (Live Blog)");
                             output.push("");
                             output.push(json.headline || "");
@@ -76,46 +69,57 @@
                             output.push("");
 
                             const updates = Array.isArray(json.liveBlogUpdate) ? json.liveBlogUpdate : [json.liveBlogUpdate];
-                            
-                            // 按時間倒序
                             updates.sort((a, b) => new Date(b.datePublished) - new Date(a.datePublished));
 
                             updates.forEach(update => {
                                 const timeStr = formatDate(update.datePublished, true);
                                 const headline = update.headline || "";
-                                const body = update.articleBody || ""; // 這裡就是你肉眼看到的那些長文
+                                const body = update.articleBody || "";
 
                                 output.push(`[${timeStr}]`);
                                 if (headline) output.push(headline);
                                 output.push("");
-                                output.push(body); // 直接輸出 articleBody
+                                output.push(body);
                                 output.push("");
                                 output.push("----------------------------------------");
                                 output.push("");
                             });
 
-                            return output.join("\n"); // 成功找到，直接返回
+                            return output.join("\n");
                         }
-                    } catch (e) {
-                        continue;
-                    }
+                    } catch (e) { continue; }
                 }
-            } catch (e) {
-                console.log("LD+JSON parsing failed, falling back...");
+            } catch (e) { console.log("LD+JSON parsing failed, moving to Strategy B..."); }
+
+            // -------------------------------------------------------------
+            // 策略 B: 安全提取 window.__preloadedData (放棄 Regex，改用 DOM)
+            // -------------------------------------------------------------
+            let jsonStr = "";
+            const allScripts = doc.querySelectorAll('script');
+            
+            for (let script of allScripts) {
+                const content = script.innerHTML;
+                if (content.includes('window.__preloadedData')) {
+                    // 1. 取得整段腳本文字
+                    let cleanContent = content.trim();
+                    
+                    // 2. 找到等號後面的內容 (即純 JSON 部分)
+                    const startIndex = cleanContent.indexOf('=') + 1;
+                    jsonStr = cleanContent.substring(startIndex).trim();
+                    
+                    // 3. 安全地移除結尾的分號 (如果有)
+                    if (jsonStr.endsWith(';')) {
+                        jsonStr = jsonStr.slice(0, -1);
+                    }
+                    break; // 找到就退出迴圈
+                }
             }
 
-
-            // -------------------------------------------------------------
-            // 策略 B: 如果策略 A 失敗，回退到舊的 window.__preloadedData 方法
-            // (適用於普通文章)
-            // -------------------------------------------------------------
-            const regex = /window\.__preloadedData\s*=\s*(\{[\s\S]*?\});/;
-            const match = htmlSource.match(regex);
-
-            if (match) {
-                let jsonStr = match[1].replace(/":undefined/g, '":null').replace(/undefined/g, 'null');
-                const data = JSON.parse(jsonStr);
+            if (jsonStr) {
+                // 處理 NYT JS 特有的 undefined 語法錯誤
+                jsonStr = jsonStr.replace(/":undefined/g, '":null').replace(/undefined/g, 'null');
                 
+                const data = JSON.parse(jsonStr);
                 const article = data?.initialData?.data?.article;
                 
                 if (article) {
@@ -123,21 +127,25 @@
                     const summary = article.summary || "";
                     const url = article.url || "";
                     
-                    // 抓取 Header
                     let bylineText = "";
+                    let locationText = "";
                     const contentBlocks = article.sprinkledBody?.content || [];
+                    
                     let headerBlock = contentBlocks.find(b => b.__typename && b.__typename.includes("Header"));
-                    if (headerBlock && headerBlock.byline?.bylines) {
-                        bylineText = headerBlock.byline.bylines[0]?.renderedRepresentation || "";
+                    if (headerBlock) {
+                        if (headerBlock.byline?.bylines) bylineText = headerBlock.byline.bylines[0]?.renderedRepresentation || "";
+                        if (headerBlock.role) locationText = headerBlock.role.map(r => r.text).join("");
                     }
+                    if (!bylineText && article.bylines) bylineText = article.bylines[0]?.renderedRepresentation || "";
 
                     output.push("The New York Times");
                     output.push("");
                     output.push(headline);
-                    output.push(summary);
+                    if(summary) output.push(summary);
                     output.push("");
-                    output.push(bylineText);
-                    output.push(formatDate(article.firstPublished));
+                    if (bylineText) output.push(bylineText);
+                    if (locationText) output.push(locationText);
+                    if (article.firstPublished) output.push(formatDate(article.firstPublished));
                     output.push("");
 
                     contentBlocks.forEach(block => {
@@ -152,6 +160,10 @@
                             if (text) { output.push(""); output.push(text); output.push(""); }
                         }
                     });
+                    
+                    // 去除結尾多餘空行
+                    while(output.length > 0 && output[output.length-1] === "") { output.pop(); }
+                    
                     output.push(""); output.push(url);
                     return output.join("\n");
                 }
@@ -166,10 +178,8 @@
             try {
                 const dateObj = new Date(isoString);
                 const estTime = new Date(dateObj.getTime() - (5 * 3600000));
-                
                 const optionsDate = { year: 'numeric', month: 'short', day: 'numeric' };
                 let dateStr = estTime.toLocaleDateString('en-US', optionsDate).replace(/([a-zA-Z]+)/, "$1.");
-                
                 if (includeTime) {
                     const optionsTime = { hour: 'numeric', minute: '2-digit', hour12: true };
                     let timeStr = estTime.toLocaleTimeString('en-US', optionsTime);
